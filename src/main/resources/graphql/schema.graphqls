@@ -1,0 +1,36 @@
+type Author {
+    id: ID!
+    name: String!
+    books: [Book!]!
+}
+
+type Book {
+    id: ID!
+    title: String!
+    publicationYear: Int
+    author: Author!
+}
+
+type Loan {
+    id: ID!
+    book: Book!
+    borrower: String!
+    loanDate: String!
+    returnDate: String
+}
+
+type Query {
+    "Lists books, optionally filtered by author id and/or a case-insensitive title match"
+    books(authorId: ID, title: String): [Book!]!
+    "Looks up a single author by id, including their books"
+    author(id: ID!): Author
+    "Lists loans that have not been returned yet"
+    activeLoans: [Loan!]!
+}
+
+type Mutation {
+    createAuthor(name: String!): Author!
+    createBook(title: String!, publicationYear: Int, authorId: ID!): Book!
+    createLoan(bookId: ID!, borrower: String!): Loan!
+    returnLoan(loanId: ID!): Loan!
+}
