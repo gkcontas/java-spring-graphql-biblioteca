@@ -35,7 +35,23 @@ API de biblioteca (autores, livros, empréstimos) em Java com Spring Boot, expos
 - `service` — testes unitários, não precisam de Docker.
 - `integration` — testes de integração executando queries/mutations reais via `GraphQlTester` contra um PostgreSQL real (Testcontainers), incluindo o teste específico de N+1 (`BookAuthorNPlusOneTest`).
 
-> **Nota sobre o ambiente de desenvolvimento usado para este projeto**: neste sandbox específico, os testes de integração baseados em Testcontainers não executam pela mesma causa raiz observada nos projetos [3](../java-spring-kafka-pipeline-eventos-cliques) e [5](../java-spring-selenium-painel-tarefas) (o cliente Docker embutido no Testcontainers, usado diretamente via Spring Boot, não negocia a versão de API do daemon Docker deste ambiente). Os 4 testes unitários passam normalmente, tudo compila, e o comportamento foi validado manualmente rodando a aplicação (ver seção seguinte).
+Suíte completa: **10 testes, todos passando** — 4 unitários e 6 de integração, incluindo o teste de N+1, que conta os statements preparados pelo Hibernate.
+
+### Por que o `spring-boot-starter-webflux` está no escopo de teste
+
+O `@AutoConfigureGraphQlTester` constrói um `HttpGraphQlTester` que roda sobre `WebTestClient`, e a auto-configuração do `WebTestClient` só entra em ação quando o WebFlux está no classpath. Sem essa dependência o contexto nem sobe: falha com `No qualifying bean of type WebTestClient`, apesar de a aplicação em si ser Spring MVC.
+
+### Nota sobre Testcontainers e Docker Engine recente
+
+Se os testes falharem com `client version 1.32 is too old. Minimum supported API version is 1.40`, a causa é o `docker-java` embutido no Testcontainers negociar a API 1.32, abaixo do mínimo aceito pelo Docker Engine 29+. Correção global, de uma linha:
+
+```bash
+echo 'api.version=1.44' > ~/.docker-java.properties
+```
+
+### Nota sobre o container nos testes
+
+`IntegrationTestBase` usa o padrão **singleton container** — iniciado num bloco `static` e nunca entregue à extensão `@Testcontainers` do JUnit. Aquela extensão amarra o ciclo de vida do container à **classe de teste**, parando-o ao fim da classe e subindo um novo, em outra porta, para a classe seguinte. O Spring, por sua vez, cacheia o contexto entre classes com a mesma configuração, então da segunda classe em diante o pool aponta para um container já destruído. Iniciar uma vez por JVM alinha os dois ciclos de vida.
 
 ## Por que `DataLoader` e por que evita N+1
 
