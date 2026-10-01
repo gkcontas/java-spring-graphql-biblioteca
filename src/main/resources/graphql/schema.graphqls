@@ -28,9 +28,15 @@ type Query {
     activeLoans: [Loan!]!
 }
 
+# Mutation payloads are nullable on purpose. A mutation can always fail, and when it
+# does the resolver returns no value: if the payload were declared non-null (Loan!),
+# GraphQL would add a NonNullableFieldWasNullError on top of the real business error,
+# and — per spec — null would bubble up to the parent. The client would receive two
+# errors for one failure, the second one pure noise about the schema rather than about
+# what went wrong.
 type Mutation {
-    createAuthor(name: String!): Author!
-    createBook(title: String!, publicationYear: Int, authorId: ID!): Book!
-    createLoan(bookId: ID!, borrower: String!): Loan!
-    returnLoan(loanId: ID!): Loan!
+    createAuthor(name: String!): Author
+    createBook(title: String!, publicationYear: Int, authorId: ID!): Book
+    createLoan(bookId: ID!, borrower: String!): Loan
+    returnLoan(loanId: ID!): Loan
 }
