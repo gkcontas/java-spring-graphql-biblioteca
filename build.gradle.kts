@@ -33,6 +33,11 @@ dependencies {
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.graphql:spring-graphql-test")
+    // Required by @AutoConfigureGraphQlTester: the HttpGraphQlTester it builds runs on
+    // top of WebTestClient, whose auto-configuration only kicks in when WebFlux is on
+    // the classpath. Without this the context fails with "No qualifying bean of type
+    // WebTestClient", even though the application itself is Spring MVC.
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
