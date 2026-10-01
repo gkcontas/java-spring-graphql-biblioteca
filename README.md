@@ -1,114 +1,99 @@
 # API GraphQL de Biblioteca
 
-API de biblioteca (autores, livros, empréstimos) em Java com Spring Boot, exposta via GraphQL (Spring for GraphQL) sobre PostgreSQL, com resolução de `Book.author` via `DataLoader` para evitar o problema clássico de N+1.
+API de biblioteca — autores, livros e empréstimos — exposta via GraphQL em vez de REST.
 
-## Status
+Além do básico de schema, queries e mutations, o projeto resolve o problema mais comum de GraphQL sobre banco relacional: o N+1. O campo `Book.author` é resolvido por `DataLoader`, que junta todos os autores pedidos em uma rodada de consulta e os busca em uma única query — a listagem custa duas consultas SQL, tenha ela 3 ou 300 livros.
 
-✅ MVP implementado.
+## Tecnologias e bibliotecas
 
-## Stack
+| | |
+|---|---|
+| Linguagem | Java 17 |
+| Framework | Spring Boot 3.3, Spring for GraphQL |
+| Persistência | Spring Data JPA, PostgreSQL 16 |
+| Migrations | Flyway |
+| Build | Gradle Kotlin DSL (wrapper `gradlew`) |
+| Testes | JUnit 5, Mockito, `GraphQlTester`, Testcontainers |
+| Apoio | Lombok |
 
-- Java 17 + Spring Boot 3.3 (Spring for GraphQL + Spring Web)
-- PostgreSQL + Spring Data JPA + Flyway
-- Lombok (nas entidades JPA)
-- Gradle (Kotlin DSL) + wrapper `gradlew`
-- Testcontainers (testes de integração) + `GraphQlTester` + JUnit 5 + Mockito
+## Pré-requisitos
+
+- JDK 17 ou superior
+- Docker
 
 ## Como rodar
 
-1. Suba o PostgreSQL:
-   ```bash
-   docker compose up -d
-   ```
-2. Rode a aplicação:
-   ```bash
-   ./gradlew bootRun
-   ```
-3. Acesse o playground GraphiQL em `http://localhost:8080/graphiql`, ou envie requisições `POST` para `http://localhost:8080/graphql`.
+```bash
+docker compose up -d
+```
 
-## Como rodar os testes
+```bash
+./gradlew bootRun
+```
+
+- Playground: `http://localhost:8080/graphiql`
+- Endpoint: `POST http://localhost:8080/graphql`
+
+## O schema
+
+```graphql
+type Query {
+  "Lista livros, com filtro opcional por autor e/ou título"
+  books(authorId: ID, title: String): [Book!]!
+  "Busca um autor pelo id, junto com seus livros"
+  author(id: ID!): Author
+  "Lista os empréstimos ainda não devolvidos"
+  activeLoans: [Loan!]!
+}
+
+type Mutation {
+  createAuthor(name: String!): Author
+  createBook(title: String!, publicationYear: Int, authorId: ID!): Book
+  createLoan(bookId: ID!, borrower: String!): Loan
+  returnLoan(loanId: ID!): Loan
+}
+```
+
+Os tipos `Author`, `Book` e `Loan` estão em [`schema.graphqls`](src/main/resources/graphql/schema.graphqls).
+
+## Exemplos de uso
+
+Pelo GraphiQL, ou por `curl`:
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "mutation { createAuthor(name: \"J.R.R. Tolkien\") { id name } }"}'
+```
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "mutation { createBook(title: \"The Hobbit\", publicationYear: 1937, authorId: 1) { id title author { name } } }"}'
+```
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "{ books(title: \"hobbit\") { title publicationYear author { name } } }"}'
+```
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "mutation { createLoan(bookId: 1, borrower: \"Alice\") { id loanDate book { title } } }"}'
+```
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "{ activeLoans { id borrower loanDate book { title } } }"}'
+```
+
+```bash
+curl -s localhost:8080/graphql -H "Content-Type: application/json" \
+  -d '{"query": "mutation { returnLoan(loanId: 1) { id returnDate } }"}'
+```
+
+## Testes
 
 ```bash
 ./gradlew test
 ```
 
-- `service` — testes unitários, não precisam de Docker.
-- `integration` — testes de integração executando queries/mutations reais via `GraphQlTester` contra um PostgreSQL real (Testcontainers), incluindo o teste específico de N+1 (`BookAuthorNPlusOneTest`).
-
-Suíte completa: **10 testes, todos passando** — 4 unitários e 6 de integração, incluindo o teste de N+1, que conta os statements preparados pelo Hibernate.
-
-### Por que o `spring-boot-starter-webflux` está no escopo de teste
-
-O `@AutoConfigureGraphQlTester` constrói um `HttpGraphQlTester` que roda sobre `WebTestClient`, e a auto-configuração do `WebTestClient` só entra em ação quando o WebFlux está no classpath. Sem essa dependência o contexto nem sobe: falha com `No qualifying bean of type WebTestClient`, apesar de a aplicação em si ser Spring MVC.
-
-### Nota sobre Testcontainers e Docker Engine recente
-
-Se os testes falharem com `client version 1.32 is too old. Minimum supported API version is 1.40`, a causa é o `docker-java` embutido no Testcontainers negociar a API 1.32, abaixo do mínimo aceito pelo Docker Engine 29+. Correção global, de uma linha:
-
-```bash
-echo 'api.version=1.44' > ~/.docker-java.properties
-```
-
-### Nota sobre o container nos testes
-
-`IntegrationTestBase` usa o padrão **singleton container** — iniciado num bloco `static` e nunca entregue à extensão `@Testcontainers` do JUnit. Aquela extensão amarra o ciclo de vida do container à **classe de teste**, parando-o ao fim da classe e subindo um novo, em outra porta, para a classe seguinte. O Spring, por sua vez, cacheia o contexto entre classes com a mesma configuração, então da segunda classe em diante o pool aponta para um container já destruído. Iniciar uma vez por JVM alinha os dois ciclos de vida.
-
-## Por que `DataLoader` e por que evita N+1
-
-Sem `DataLoader`, resolver `author` para uma listagem de N livros dispararia uma consulta SQL por livro (N+1: 1 para buscar os livros + N para buscar cada autor individualmente). O `Book` guarda o `authorId` como uma coluna simples (mapeada lado a lado com a associação `@ManyToOne`, mas marcada `insertable = false, updatable = false`), então lê-lo nunca dispara o carregamento preguiçoso do relacionamento.
-
-O resolver `Book.author` (`BookFieldController`) usa esse `authorId` para pedir o autor a um `DataLoader<Long, Author>` em vez de acessá-lo diretamente. O Spring for GraphQL acumula todos os `authorId` pedidos durante a mesma "rodada" de resolução de uma consulta (todos os livros da listagem) e só então executa o `BatchLoader` registrado em `DataLoaderConfig`, que faz **uma única** chamada `AuthorRepository.findAllById(ids)` para todos eles — não importa se a listagem tem 3 livros ou 300, sempre no máximo 2 consultas SQL no total (uma para os livros, uma para os autores distintos). Isso é verificado automaticamente pelo teste `BookAuthorNPlusOneTest`, que zera as estatísticas do Hibernate antes da consulta e garante que no máximo 2 `PreparedStatement`s foram executados.
-
-## Exemplos de query/mutation
-
-```graphql
-mutation {
-  createAuthor(name: "J.R.R. Tolkien") { id name }
-}
-
-mutation {
-  createBook(title: "The Hobbit", publicationYear: 1937, authorId: 1) {
-    id
-    title
-    author { name }
-  }
-}
-
-query {
-  books(title: "hobbit") {
-    title
-    publicationYear
-    author { name }
-  }
-}
-
-query {
-  author(id: 1) {
-    name
-    books { title publicationYear }
-  }
-}
-
-mutation {
-  createLoan(bookId: 1, borrower: "Alice") {
-    id
-    loanDate
-    book { title }
-  }
-}
-
-query {
-  activeLoans {
-    id
-    borrower
-    loanDate
-    book { title }
-  }
-}
-
-mutation {
-  returnLoan(loanId: 1) { id returnDate }
-}
-```
-
-Todos os fluxos acima (criação de autor/livro/empréstimo, filtros de `books`, listagem/devolução de empréstimos, e os erros de "não encontrado" e "empréstimo já devolvido") foram validados manualmente via GraphiQL durante o desenvolvimento.
+10 testes: 4 unitários e 6 de integração, que executam queries e mutations reais contra um PostgreSQL em container. Um deles conta os statements preparados pelo Hibernate para garantir que a listagem de livros continua custando no máximo duas consultas, independentemente do número de livros.
